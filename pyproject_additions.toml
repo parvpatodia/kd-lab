@@ -1,0 +1,25 @@
+# Merge these into kd-lab's pyproject.toml (do not overwrite the existing file).
+# They configure ruff, mypy, and pytest for the on-policy distillation branch.
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, isort, pyupgrade, bugbear, comprehensions
+select = ["F", "E", "W", "I", "UP", "B", "C4"]
+ignore = ["E741"]  # ambiguous names like `l` show up in math; allow locally if needed
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true   # torch/transformers/vllm stubs are incomplete
+# Start lenient, tighten over time:
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

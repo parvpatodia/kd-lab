@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU torch so the divergence tests run; pin if kd-lab pins torch elsewhere
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pyyaml pytest ruff mypy
+          # if the repo is packaged, prefer: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check kd_lab tests
+      - name: Type-check
+        run: mypy kd_lab || true   # advisory until annotations stabilize; flip to blocking later
+      - name: Test
+        run: pytest -q
