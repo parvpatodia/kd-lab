@@ -218,8 +218,9 @@ def load_models(cfg: dict):
     dtype = getattr(torch, m.get("dtype", "bfloat16"))
     device = cfg.get("device", "cuda")
     tokenizer = AutoTokenizer.from_pretrained(m["student"])
-    student = AutoModelForCausalLM.from_pretrained(m["student"], torch_dtype=dtype).to(device)
-    teacher = AutoModelForCausalLM.from_pretrained(m["teacher"], torch_dtype=dtype).to(device)
+    # `dtype=` is the current kwarg (transformers >=4.44 and 5.x); `torch_dtype` was removed in 5.x.
+    student = AutoModelForCausalLM.from_pretrained(m["student"], dtype=dtype).to(device)
+    teacher = AutoModelForCausalLM.from_pretrained(m["teacher"], dtype=dtype).to(device)
     teacher.eval()
     for p in teacher.parameters():
         p.requires_grad_(False)
