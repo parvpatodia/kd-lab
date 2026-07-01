@@ -103,6 +103,30 @@ def build_pointer_chase_data(cfg: dict):
     return train, eval_sets
 
 
+def build_task_data(cfg: dict):
+    """Dispatch on ``task.name``: pointer_chase (synthetic, offline) or gsm8k (external validity)."""
+    name = cfg["task"].get("name", "pointer_chase")
+    if name == "pointer_chase":
+        return build_pointer_chase_data(cfg)
+    if name == "gsm8k":
+        from ..tasks.gsm8k import eval_sets_by_length, load_gsm8k  # lazy: needs `datasets`
+
+        t = cfg["task"]
+        train = load_gsm8k("train", n=t.get("n_train"))
+        test = load_gsm8k("test", n=t.get("n_eval_total"))
+        return train, eval_sets_by_length(test)
+    raise ValueError(f"unknown task: {name}")
+
+
+def get_scorer(cfg: dict):
+    """Return the exact-match scorer for the configured task."""
+    if cfg["task"].get("name", "pointer_chase") == "gsm8k":
+        from ..tasks.gsm8k import score_gsm8k
+
+        return score_gsm8k
+    return score_final
+
+
 def build_rollout_source(cfg: dict, student, sampler, off_dataset):
     """Select the data source from the distillation block and the method."""
     d = cfg["distillation"]
@@ -264,7 +288,7 @@ def build_optimizer(cfg: dict, student):
 def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "results") -> dict:
     """Train one condition then evaluate. Returns the metrics dict and writes it to disk."""
     seed_everything(int(cfg.get("seed", 0)))
-    train_examples, eval_sets = build_pointer_chase_data(cfg)
+    train_examples, eval_sets = build_task_data(cfg)
 
     divergence = build_divergence(
         cfg["distillation"]["divergence"],
@@ -301,12 +325,13 @@ def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "result
 
 def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
     """Greedy horizon-stratified exact-match accuracy + the positional teacher-student KL probe."""
+    scorer = get_scorer(cfg)
     records = []
     for k, examples in eval_sets.items():
         roll = comp.eval_sampler.generate(comp.student, examples)
         texts = decode_responses(comp.tokenizer, roll)
         for ex, txt in zip(examples, texts, strict=True):
-            records.append({"k": k, "correct": int(score_final(txt, ex))})
+            records.append({"k": k, "correct": int(scorer(txt, ex))})
     horizon = horizon_stratified_accuracy(records)
 
     # positional-KL probe on one mid-horizon eval set (RQ1 mechanism diagnostic).
@@ -340,6 +365,7 @@ def _passk_and_diversity(cfg: dict, comp: RunComponents, eval_sets: dict) -> dic
     ks = [k for k in ecfg.get("pass_at_k", [1, 4, 16]) if k <= n]
     cap = int(ecfg.get("passk_examples", 50))
     pool = [ex for exs in eval_sets.values() for ex in exs][:cap]
+    scorer = get_scorer(cfg)
 
     correct = [0] * len(pool)
     gen_tokens: list[list[int]] = []
@@ -347,7 +373,7 @@ def _passk_and_diversity(cfg: dict, comp: RunComponents, eval_sets: dict) -> dic
         roll = comp.sampler.generate(comp.student, pool)  # sampling (temperature > 0)
         texts = decode_responses(comp.tokenizer, roll)
         for i, (ex, txt) in enumerate(zip(pool, texts, strict=True)):
-            if score_final(txt, ex):
+            if scorer(txt, ex):
                 correct[i] += 1
         gen_tokens.extend(response_token_ids(roll))
 
@@ -396,7 +422,7 @@ def _save_horizon_figure(results: dict, path: Path) -> None:
 def train_and_eval(cfg: dict) -> dict:
     """Full condition on real models (A100 path). Builds components, then runs the loop + eval."""
     seed_everything(int(cfg.get("seed", 0)))
-    train_examples, _ = build_pointer_chase_data(cfg)
+    train_examples, _ = build_task_data(cfg)
     student, teacher, tokenizer = load_models(cfg)
     sampler = build_sampler(cfg, tokenizer)
     eval_sampler = build_sampler(cfg, tokenizer, greedy=True)
@@ -435,7 +461,7 @@ def main() -> None:
     cfg = load_config(args.config)
     plan = resolved_plan(cfg)
     if args.dry_run:
-        train, eval_sets = build_pointer_chase_data(cfg)
+        train, eval_sets = build_task_data(cfg)
         build_divergence(
             cfg["distillation"]["divergence"],
             temperature=cfg["distillation"].get("temperature", 1.0),
