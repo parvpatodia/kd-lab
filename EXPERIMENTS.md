@@ -26,6 +26,24 @@ positional teacher-student KL curve. State plainly whether the gap widens with h
 
 ## Phase log (no-run phases recorded here; numbered runs go below)
 
+### 2026-06-30  Phase 2 — Off-policy baselines wired (no GPU run)
+- Implemented the `run.py` SEAMs: `load_models` (transformers, lazy import + vocab-parity guard),
+  `build_sampler` (HFSampler, greedy/sampled), `build_offpolicy_dataset` (`EncodedRolloutDataset`;
+  gold for sft/logit_kd, teacher generations for seq_kd), `build_optimizer` (AdamW + cosine
+  warmup), method routing (sft/seq_kd -> SupervisedDistiller; logit_kd/on_policy ->
+  OnPolicyDistiller), and `run_condition` (train loop + greedy horizon eval + positional-KL probe
+  + metrics.json + horizon figure).
+- Validated offline (no HF, no GPU) via dependency injection: tiny torch models + a stub tokenizer
+  + a tiled sampler drive the full sft and on_policy paths end to end (`tests/test_runner.py`).
+- Gate status: the BUILDPLAN Phase 2 gate ("baselines run end-to-end on the A100, plausible
+  accuracy") needs the cluster and is NOT met here (dev box has no CUDA/SLURM; HF downloads
+  unavailable). The code is cluster-ready and the orchestration is verified offline. No accuracy
+  numbers produced (honesty clause).
+- Env note: local numpy 2.x caused a transformers/tokenizers ABI break; installing matplotlib
+  pulled numpy back to 1.26.4 and cleared it. HF model *downloads* still fail here (egress), so
+  real-model validation is deferred to the cluster.
+- pytest 49 passed; ruff clean; mypy clean (13 files).
+
 ### 2026-06-30  Phase 1 — Divergences + tests (no GPU run)
 - Added `tests/test_phase1.py`: reverse-KL gradient sign on a 2-token vocab (autograd vs the
   closed form `dRKL/dz_i = q_i(log(q_i/p_i) - RKL)`); numpy closed-form reference cross-check for
