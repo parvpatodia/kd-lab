@@ -38,7 +38,12 @@ from ..distillation.on_policy import (
 )
 from ..distillation.sampling import HFSampler
 from ..distillation.supervised import SupervisedDistiller
-from ..evaluation.metrics import horizon_stratified_accuracy
+from ..evaluation.metrics import (
+    aggregate_pass_at_k,
+    distinct_n,
+    empirical_token_entropy,
+    horizon_stratified_accuracy,
+)
 from ..evaluation.positional_kl import positional_teacher_student_kl
 from ..tasks.pointer_chase import PointerChaseConfig, make_dataset, make_eval_sets, score_final
 
@@ -173,6 +178,13 @@ def decode_responses(tokenizer, rollouts: Rollouts) -> list[str]:
     return out
 
 
+def response_token_ids(rollouts: Rollouts) -> list[list[int]]:
+    """The response token ids per row (for distinct-n and token entropy)."""
+    ids = rollouts.input_ids.cpu()
+    mask = rollouts.response_mask.bool().cpu()
+    return [row_ids[row_mask].tolist() for row_ids, row_mask in zip(ids, mask, strict=True)]
+
+
 # ---- SEAMS: real HF wiring, exercised on the A100 (import transformers lazily) ----
 def load_models(cfg: dict):
     """Load student (trainable) + teacher (frozen) + shared tokenizer. Needs a GPU for real sizes."""
@@ -281,9 +293,8 @@ def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "result
         "config_hash": config_hash(cfg),
         "n_train": len(train_examples),
         "train_log": train_log,
-        "horizon_accuracy": eval_out["horizon_accuracy"],
-        "positional_kl": eval_out["positional_kl"],
     }
+    results.update(eval_out)  # horizon_accuracy, positional_kl, and optional pass_at_k/diversity
     _save_results(cfg, results, results_root)
     return results
 
@@ -311,7 +322,43 @@ def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
         "position": pk["position"][valid].tolist(),
         "mean_kl": [float(x) for x in pk["mean_kl"][valid]],
     }
-    return {"horizon_accuracy": horizon, "positional_kl": positional}
+    out = {"horizon_accuracy": horizon, "positional_kl": positional}
+    out.update(_passk_and_diversity(cfg, comp, eval_sets))
+    return out
+
+
+def _passk_and_diversity(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
+    """Optional H2 metrics: pass@k plus diversity (distinct-n, token entropy) from sampled outputs.
+
+    Gated by ``eval.n_samples_for_pass_at_k`` (0 disables). Uses the sampling sampler (temperature
+    > 0), not the greedy eval sampler, over a capped pool of eval examples to bound cost.
+    """
+    ecfg = cfg.get("eval", {})
+    n = int(ecfg.get("n_samples_for_pass_at_k", 0))
+    if n <= 0:
+        return {}
+    ks = [k for k in ecfg.get("pass_at_k", [1, 4, 16]) if k <= n]
+    cap = int(ecfg.get("passk_examples", 50))
+    pool = [ex for exs in eval_sets.values() for ex in exs][:cap]
+
+    correct = [0] * len(pool)
+    gen_tokens: list[list[int]] = []
+    for _ in range(n):
+        roll = comp.sampler.generate(comp.student, pool)  # sampling (temperature > 0)
+        texts = decode_responses(comp.tokenizer, roll)
+        for i, (ex, txt) in enumerate(zip(pool, texts, strict=True)):
+            if score_final(txt, ex):
+                correct[i] += 1
+        gen_tokens.extend(response_token_ids(roll))
+
+    return {
+        "pass_at_k": {f"pass@{k}": aggregate_pass_at_k(correct, n, k) for k in ks},
+        "diversity": {
+            "distinct_1": distinct_n(gen_tokens, 1),
+            "distinct_2": distinct_n(gen_tokens, 2),
+            "token_entropy": empirical_token_entropy(gen_tokens),
+        },
+    }
 
 
 def _save_results(cfg: dict, results: dict, results_root: str) -> None:
