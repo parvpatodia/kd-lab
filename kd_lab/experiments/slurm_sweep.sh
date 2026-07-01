@@ -28,10 +28,16 @@ module load cuda/12.3.0
 module load cuDNN/9.10.2
 module load anaconda3/2024.06
 
+# Explorer proxy for outbound (HF model downloads). Set AFTER module purge, which clears it.
+export http_proxy=http://10.99.0.130:3128
+export https_proxy=http://10.99.0.130:3128
+
 PROJ_DIR="${PROJ_DIR:-/home/patodia.pa/kd-lab}"
 cd "$PROJ_DIR"
 mkdir -p logs
 source .venv_hpc/bin/activate
+# Shared HF cache so array tasks reuse downloaded weights instead of each re-downloading.
+export HF_HOME="${HF_HOME:-/home/patodia.pa/.cache/huggingface}"
 
 CONFIG_DIR="${1:-configs/generated}"
 mapfile -t CONFIGS < <(ls "${CONFIG_DIR}"/*.yaml | sort)
