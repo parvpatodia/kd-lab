@@ -72,14 +72,26 @@ in {0.0, 0.25, 0.5, 0.75, 1.0} with the primary divergence.
 ## 7. File map
 ```
 kd_lab/distillation/divergences.py   done   ForwardKL, ReverseKL, GeneralizedJSD, build_divergence
-kd_lab/distillation/on_policy.py     done*  Rollouts, Sampler(ABC), RolloutSource(+Mixed),
-                                            shift_for_next_token, OnPolicyDistiller  (*model/sampler I/O are SEAMs)
+                                            (matches TRL GKD loss exactly, see tests/test_trl_oracle.py)
+kd_lab/distillation/on_policy.py     done   Rollouts, Sampler(ABC), RolloutSource(+Mixed),
+                                            shift_for_next_token, OnPolicyDistiller (CPU-smoke verified)
+kd_lab/distillation/supervised.py    done   cross_entropy_next_token + SupervisedDistiller (B0/B1)
+kd_lab/distillation/sampling.py      done   build_response_mask (exhaustively tested) + HFSampler
 kd_lab/tasks/pointer_chase.py        done   generator + verifier + dataset builders
 kd_lab/evaluation/metrics.py         done   pass@k, distinct-n, entropy, bootstrap, paired, horizon
-kd_lab/evaluation/positional_kl.py   done*  mechanism probe (*model .logits is a SEAM)
-kd_lab/experiments/run.py            SEAM   config -> condition; --dry-run works; loaders/loop are SEAMs
+kd_lab/evaluation/positional_kl.py   done   mechanism probe (wired into run.evaluate)
+kd_lab/experiments/run.py            impl   full loop+eval; run_condition CPU-validated by injection.
+                                            Remaining SEAMs: load_models real-HF path (cluster-only,
+                                            untested locally: no CUDA + HF downloads blocked here) and a
+                                            vLLM sampler for throughput. GSM8K loader not yet added.
+pyproject.toml                       done   installable package + ruff/mypy/pytest config
 configs/opd_rkl_smoke.yaml           done   tiny end-to-end smoke config
-tests/test_scaffold.py               done   divergences (needs torch), task, metrics
+tests/test_scaffold.py               done   divergences, task, metrics (delivered suite)
+tests/test_phase1.py                 done   gradient sign, numpy reference, tau^2, masking, CPU step
+tests/test_supervised.py             done   B0/B1 CE objective + distiller
+tests/test_sampling.py               done   response-mask cases + HFSampler wiring
+tests/test_runner.py                 done   full sft/on_policy orchestration via injection (no HF/GPU)
+tests/test_trl_oracle.py             done   divergence parity vs TRL GKD (skips if trl absent)
 ```
 
 ## 8. Models and compute

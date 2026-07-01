@@ -1,0 +1,55 @@
+# Full-scale base config for the pointer-chase experiments (A100). The sweep generator
+# (kd_lab.experiments.sweep) overrides the `distillation` block and `seed`/`run_name` per
+# condition. Hyperparameters below are starting points; measure GPU-hours and tune on the
+# first real run (BUILDPLAN section 11), then update. This does NOT run on the dev box
+# (no CUDA; HF downloads blocked): launch it on the cluster.
+
+run_name: pointer_chase_base   # overridden by the sweep
+seed: 0
+device: cuda
+
+task:
+  name: pointer_chase
+  num_nodes: 32
+  shuffle_table: true
+  train_k: [2, 3, 4]                    # horizons mixed during training
+  eval_k: [2, 3, 4, 5, 6, 7, 8]         # horizon sweep for RQ1 (includes extrapolation beyond train)
+  n_train: 4000
+  n_eval_per_k: 200
+
+models:
+  student: Qwen/Qwen2.5-0.5B-Instruct
+  teacher: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: bfloat16
+
+distillation:                          # overridden per condition by the sweep
+  method: on_policy                    # sft | seq_kd | logit_kd | on_policy
+  divergence: reverse_kl               # reverse_kl | forward_kl | generalized_jsd
+  beta: 0.5                            # generalized_jsd only
+  temperature: 1.0
+  on_policy_fraction: 1.0              # lambda; 0.0 fully off-policy, 1.0 fully on-policy
+
+sampling:
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 128
+
+optim:
+  lr: 1.0e-5
+  weight_decay: 0.0
+  warmup_steps: 50
+  max_steps: 1000
+  batch_size: 16
+  grad_accum: 1
+  grad_clip: 1.0
+  max_seq_len: 1024
+
+eval:
+  probe_examples: 64                   # rollouts for the positional-KL probe
+  pass_at_k: [1, 4, 16]                # wired in Phase 5
+  n_samples_for_pass_at_k: 16
+  seeds: [0, 1, 2]
+
+logging:
+  backend: wandb
+  project: kd-lab-opd

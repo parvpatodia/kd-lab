@@ -26,6 +26,23 @@ positional teacher-student KL curve. State plainly whether the gap widens with h
 
 ## Phase log (no-run phases recorded here; numbered runs go below)
 
+### 2026-06-30  Phase 3 — On-policy distiller + TRL oracle (no GPU run)
+- The on-policy distiller was implemented in Phase 1 (CPU smoke: loss decreases over 30 steps,
+  student updates, teacher stays frozen with no grad). Phase 3 adds the correctness oracle.
+- `tests/test_trl_oracle.py`: hand-rolled divergences vs TRL `GKDTrainer.generalized_jsd_loss`
+  (trl 1.7.0). Exact parity: forward KL == TRL beta=0 (max|diff| 0.0), reverse KL == TRL beta=1
+  (0.0), generalized JSD == TRL for beta in {0.1,0.3,0.5,0.9} (~1e-8). Endpoint convention
+  difference documented and pinned: our JSD(0)=JSD(1)=0 (true JSD) vs TRL's special-cased raw KL
+  (DESIGN section 2). This is stronger than a single-config numeric check.
+- Launch infra (Phase 4 prep, no GPU): `kd_lab/experiments/sweep.py` (12-condition x 3-seed = 36
+  config matrix; dry-run verified), `configs/pointer_chase_base.yaml` (full-scale starting point),
+  `kd_lab/experiments/slurm_sweep.sh` (templated A100 array launcher).
+- Gate: substance met (exact TRL loss-math parity; OPD loop trains and loss decreases at CPU toy
+  scale). The real-model smoke-config training run is GPU-deferred. pytest 57 passed; ruff clean;
+  mypy clean (14 files).
+- BOUNDARY: Phases 4-6 (the experiments and their numbers) require the A100 cluster; no CUDA/SLURM
+  here. Stopping for the cluster checkpoint (BUILDPLAN section 0). No accuracy numbers produced.
+
 ### 2026-06-30  Phase 2 — Off-policy baselines wired (no GPU run)
 - Implemented the `run.py` SEAMs: `load_models` (transformers, lazy import + vocab-parity guard),
   `build_sampler` (HFSampler, greedy/sampled), `build_offpolicy_dataset` (`EncodedRolloutDataset`;
