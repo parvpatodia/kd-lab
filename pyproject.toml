@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kd-lab"
+version = "0.1.0"
+description = "Knowledge distillation lab: on-policy distillation branch (GKD divergence x data-source design space)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "torch>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.5", "mypy>=1.8", "types-PyYAML"]
+# Heavy / cluster-side extras. vLLM is intentionally omitted (no reliable macOS wheel);
+# install it on the A100 host for fast on-policy sampling. See DESIGN.md section 9.
+experiments = ["transformers>=4.40", "trl>=0.9", "matplotlib>=3.7"]
+
+[tool.setuptools.packages.find]
+include = ["kd_lab*"]
+
+# ----------------------------------------------------------------------------------------
+# Tooling (folded in from the scaffold's pyproject_additions.toml so ruff/mypy/pytest pick
+# up a single source of truth).
+# ----------------------------------------------------------------------------------------
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, isort, pyupgrade, bugbear, comprehensions
+select = ["F", "E", "W", "I", "UP", "B", "C4"]
+ignore = ["E741"]  # ambiguous names like `l` show up in math
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules guard heavy imports behind pytest.importorskip, which must run before the
+# guarded imports, so module-level-import-not-at-top does not apply to them.
+"tests/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true   # torch/transformers/vllm/yaml stubs are incomplete
+disallow_untyped_defs = false   # start lenient, tighten over time
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

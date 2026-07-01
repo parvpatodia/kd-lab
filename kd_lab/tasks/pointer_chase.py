@@ -76,7 +76,9 @@ def make_example(seed: int, k: int, cfg: PointerChaseConfig | None = None) -> di
     return render_example(perm, start, k, rng, cfg)
 
 
-def make_dataset(n: int, ks: list[int], base_seed: int = 0, cfg: PointerChaseConfig | None = None) -> list[dict]:
+def make_dataset(
+    n: int, ks: list[int], base_seed: int = 0, cfg: PointerChaseConfig | None = None
+) -> list[dict]:
     """Return ``n`` examples with horizons drawn uniformly from ``ks`` (reproducible)."""
     cfg = cfg or PointerChaseConfig()
     rng = random.Random(base_seed)
@@ -87,7 +89,9 @@ def make_dataset(n: int, ks: list[int], base_seed: int = 0, cfg: PointerChaseCon
     return out
 
 
-def make_eval_sets(n_per_k: int, ks: list[int], base_seed: int = 10_000, cfg: PointerChaseConfig | None = None) -> dict:
+def make_eval_sets(
+    n_per_k: int, ks: list[int], base_seed: int = 10_000, cfg: PointerChaseConfig | None = None
+) -> dict:
     """Return ``{k: [examples]}`` with a fixed count per horizon, for the RQ1 horizon sweep."""
     cfg = cfg or PointerChaseConfig()
     sets: dict[int, list[dict]] = {}

@@ -26,6 +26,20 @@ positional teacher-student KL curve. State plainly whether the gap widens with h
 
 ## Phase log (no-run phases recorded here; numbered runs go below)
 
+### 2026-06-30  Phase 1 — Divergences + tests (no GPU run)
+- Added `tests/test_phase1.py`: reverse-KL gradient sign on a 2-token vocab (autograd vs the
+  closed form `dRKL/dz_i = q_i(log(q_i/p_i) - RKL)`); numpy closed-form reference cross-check for
+  FKL/RKL/JSD; tau^2 scaling isolated from softening; masked positions contribute exactly zero to
+  loss and gradient; CPU end-to-end `OnPolicyDistiller.step` on a 2-layer toy model (student
+  updates, teacher stays frozen with no grad, loss falls over 30 steps).
+- Infra: created `pyproject.toml` (installable package + single-source ruff/mypy/pytest config,
+  tests-only E402 ignore for the `importorskip` pattern); fixed `F841` in the `run.py` SEAM;
+  cleared pre-existing `E501`/`UP035`/`F401` in the scaffold; CI installs via `.[dev]` and mypy is
+  now blocking.
+- Gate: `pytest` 32 passed (26 scaffold + 6 new); `ruff` clean; `mypy` clean (11 files); dry-run
+  intact. No training run, so no numbers produced (honesty clause).
+- Note: the TRL `GKDTrainer` loss-parity oracle is deferred to Phase 3 (needs `trl` + a tiny model).
+
 ### 2026-06-30  Phase 0 — Orient (no GPU run)
 - Read BUILDPLAN + DESIGN + the full scaffold. Floor verified: `pytest -q` = 26 passed (torch
   2.10.0 present, divergence tests ran); `run --config configs/opd_rkl_smoke.yaml --dry-run` prints

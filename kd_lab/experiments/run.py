@@ -104,7 +104,9 @@ def train_and_eval(cfg: dict) -> dict:
     )
     # SEAM: batching of `train_examples` into prompts, the step loop to cfg['optim']['max_steps'],
     # logging, checkpointing, and the horizon/diversity/positional-KL evaluation on `eval_sets`.
-    raise NotImplementedError("SEAM: implement the step loop + evaluation; see DESIGN.md Phase 3-5")
+    raise NotImplementedError(
+        f"SEAM: implement the {type(distiller).__name__} step loop + evaluation; see DESIGN.md Phase 3-5"
+    )
 
 
 def resolved_plan(cfg: dict) -> ResolvedCondition:

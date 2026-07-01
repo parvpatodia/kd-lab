@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 from itertools import combinations
 
-import numpy as np
 import pytest
 
 from kd_lab.evaluation.metrics import (
@@ -24,7 +23,6 @@ from kd_lab.evaluation.metrics import (
 )
 from kd_lab.tasks.pointer_chase import (
     PointerChaseConfig,
-    chase,
     make_dataset,
     make_eval_sets,
     make_example,
@@ -36,6 +34,7 @@ from kd_lab.tasks.pointer_chase import (
 
 try:
     import torch
+
     from kd_lab.distillation.divergences import (
         ForwardKL,
         GeneralizedJSD,

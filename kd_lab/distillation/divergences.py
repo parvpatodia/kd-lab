@@ -124,7 +124,9 @@ class GeneralizedJSD(Divergence):
     def _per_token(self, log_p_teacher: torch.Tensor, log_q_student: torch.Tensor) -> torch.Tensor:
         beta = self.beta
         if beta <= 0.0 or beta >= 1.0:
-            return torch.zeros(log_p_teacher.shape[:-1], device=log_p_teacher.device, dtype=log_p_teacher.dtype)
+            return torch.zeros(
+                log_p_teacher.shape[:-1], device=log_p_teacher.device, dtype=log_p_teacher.dtype
+            )
         p = log_p_teacher.exp()
         q = log_q_student.exp()
         # log m = logaddexp(log(beta) + log_p, log(1 - beta) + log_q), stable in log-space.

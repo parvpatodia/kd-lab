@@ -8,7 +8,7 @@ and unit-testable without a model. ``pass_at_k`` is the unbiased estimator of Ch
 from __future__ import annotations
 
 from collections import Counter
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -68,7 +68,11 @@ def bootstrap_ci(values: Sequence[float], n_boot: int = 10_000, alpha: float = 0
 
 
 def paired_bootstrap_diff(
-    correct_a: Sequence[float], correct_b: Sequence[float], n_boot: int = 10_000, alpha: float = 0.05, seed: int = 0
+    correct_a: Sequence[float],
+    correct_b: Sequence[float],
+    n_boot: int = 10_000,
+    alpha: float = 0.05,
+    seed: int = 0,
 ):
     """Paired bootstrap CI of the mean per-example difference ``a - b``.
 
