@@ -329,20 +329,28 @@ def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "result
 def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
     """Greedy horizon-stratified exact-match accuracy + the positional teacher-student KL probe."""
     scorer = get_scorer(cfg)
+    eval_bs = int(cfg.get("eval", {}).get("eval_batch_size", 16))
     records = []
     for k, examples in eval_sets.items():
-        roll = comp.eval_sampler.generate(comp.student, examples)
-        texts = decode_responses(comp.tokenizer, roll)
-        for ex, txt in zip(examples, texts, strict=True):
-            records.append({"k": k, "correct": int(scorer(txt, ex))})
+        for i in range(0, len(examples), eval_bs):  # chunk: generation OOMs on a full horizon set
+            chunk = examples[i : i + eval_bs]
+            texts = decode_responses(comp.tokenizer, comp.eval_sampler.generate(comp.student, chunk))
+            records.extend(
+                {"k": k, "correct": int(scorer(txt, ex))} for ex, txt in zip(chunk, texts, strict=True)
+            )
     horizon = horizon_stratified_accuracy(records)
 
     # positional-KL probe on one mid-horizon eval set (RQ1 mechanism diagnostic).
     ks = sorted(eval_sets)
-    probe_examples = eval_sets[ks[len(ks) // 2]][: cfg.get("eval", {}).get("probe_examples", 32)]
+    probe_examples = eval_sets[ks[len(ks) // 2]][: int(cfg.get("eval", {}).get("probe_examples", 16))]
     probe_roll = comp.eval_sampler.generate(comp.student, probe_examples)
     pk = positional_teacher_student_kl(
-        comp.student, comp.teacher, probe_roll, device=cfg.get("device", "cuda"), direction="reverse"
+        comp.student,
+        comp.teacher,
+        probe_roll,
+        device=cfg.get("device", "cuda"),
+        direction="reverse",
+        batch_size=min(eval_bs, 4),  # the scoring forward is the heaviest op (two [B,T,V] tensors)
     )
     # keep only populated positions, as plain lists for JSON.
     valid = pk["count"] > 0
@@ -367,18 +375,21 @@ def _passk_and_diversity(cfg: dict, comp: RunComponents, eval_sets: dict) -> dic
         return {}
     ks = [k for k in ecfg.get("pass_at_k", [1, 4, 16]) if k <= n]
     cap = int(ecfg.get("passk_examples", 50))
+    eval_bs = int(ecfg.get("eval_batch_size", 16))
     pool = [ex for exs in eval_sets.values() for ex in exs][:cap]
     scorer = get_scorer(cfg)
 
     correct = [0] * len(pool)
     gen_tokens: list[list[int]] = []
     for _ in range(n):
-        roll = comp.sampler.generate(comp.student, pool)  # sampling (temperature > 0)
-        texts = decode_responses(comp.tokenizer, roll)
-        for i, (ex, txt) in enumerate(zip(pool, texts, strict=True)):
-            if scorer(txt, ex):
-                correct[i] += 1
-        gen_tokens.extend(response_token_ids(roll))
+        for i in range(0, len(pool), eval_bs):  # chunk generation to bound memory
+            chunk = pool[i : i + eval_bs]
+            roll = comp.sampler.generate(comp.student, chunk)  # sampling (temperature > 0)
+            texts = decode_responses(comp.tokenizer, roll)
+            for j, (ex, txt) in enumerate(zip(chunk, texts, strict=True)):
+                if scorer(txt, ex):
+                    correct[i + j] += 1
+            gen_tokens.extend(response_token_ids(roll))
 
     return {
         "pass_at_k": {f"pass@{k}": aggregate_pass_at_k(correct, n, k) for k in ks},

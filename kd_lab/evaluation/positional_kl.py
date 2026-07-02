@@ -27,6 +27,7 @@ def positional_teacher_student_kl(
     device: str = "cuda",
     max_positions: int = 256,
     direction: str = "reverse",
+    batch_size: int = 8,
 ) -> dict:
     """Return mean KL per response-token position over the given rollouts.
 
@@ -39,35 +40,42 @@ def positional_teacher_student_kl(
 
     Returns ``{position, mean_kl, count}`` as numpy arrays of length ``max_positions``.
     """
-    ids = rollouts.input_ids.to(device)
-    attn = rollouts.attention_mask.to(device)
-    rmask = rollouts.response_mask.to(device)
-
-    s = student(input_ids=ids, attention_mask=attn).logits  # SEAM
-    t = teacher(input_ids=ids, attention_mask=attn).logits  # SEAM
-
-    log_s = torch.log_softmax(s[:, :-1, :], dim=-1)
-    log_t = torch.log_softmax(t[:, :-1, :], dim=-1)
-    if direction == "reverse":
-        per = (log_s.exp() * (log_s - log_t)).sum(dim=-1)  # KL(student || teacher)
-    elif direction == "forward":
-        per = (log_t.exp() * (log_t - log_s)).sum(dim=-1)  # KL(teacher || student)
-    else:
+    if direction not in ("reverse", "forward"):
         raise ValueError("direction must be 'reverse' or 'forward'")
-
-    pred_mask = rmask[:, 1:].bool().cpu().numpy()
-    per_np = per.float().cpu().numpy()
 
     sums = np.zeros(max_positions)
     counts = np.zeros(max_positions)
-    for b in range(pred_mask.shape[0]):
-        pos = 0
-        for tpos in range(pred_mask.shape[1]):
-            if pred_mask[b, tpos]:
-                if pos < max_positions:
-                    sums[pos] += per_np[b, tpos]
-                    counts[pos] += 1
-                pos += 1
+    n = rollouts.input_ids.shape[0]
+    # Chunk over the batch: two [chunk, T, vocab] logit tensors at V=151936 OOM a GPU if the whole
+    # probe set is forwarded at once.
+    for start in range(0, n, batch_size):
+        sl = slice(start, start + batch_size)
+        ids = rollouts.input_ids[sl].to(device)
+        attn = rollouts.attention_mask[sl].to(device)
+        rmask = rollouts.response_mask[sl].to(device)
+
+        s = student(input_ids=ids, attention_mask=attn).logits
+        t = teacher(input_ids=ids, attention_mask=attn).logits
+        log_s = torch.log_softmax(s[:, :-1, :], dim=-1)
+        log_t = torch.log_softmax(t[:, :-1, :], dim=-1)
+        if direction == "reverse":
+            per = (log_s.exp() * (log_s - log_t)).sum(dim=-1)  # KL(student || teacher)
+        else:
+            per = (log_t.exp() * (log_t - log_s)).sum(dim=-1)  # KL(teacher || student)
+
+        pred_mask = rmask[:, 1:].bool().cpu().numpy()
+        per_np = per.float().cpu().numpy()
+        del s, t, log_s, log_t, per
+
+        for b in range(pred_mask.shape[0]):
+            pos = 0
+            for tpos in range(pred_mask.shape[1]):
+                if pred_mask[b, tpos]:
+                    if pos < max_positions:
+                        sums[pos] += per_np[b, tpos]
+                        counts[pos] += 1
+                    pos += 1
+
     with np.errstate(invalid="ignore"):
         mean_kl = np.where(counts > 0, sums / np.maximum(counts, 1), np.nan)
     return {"position": np.arange(max_positions), "mean_kl": mean_kl, "count": counts}

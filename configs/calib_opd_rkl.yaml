@@ -43,7 +43,8 @@ optim:
   max_seq_len: 640
 
 eval:
-  probe_examples: 32
+  probe_examples: 16
+  eval_batch_size: 8
 
 logging:
   backend: none
