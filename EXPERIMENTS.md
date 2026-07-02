@@ -26,6 +26,20 @@ positional teacher-student KL curve. State plainly whether the gap widens with h
 
 ## Phase log (no-run phases recorded here; numbered runs go below)
 
+### 2026-07-02  Phase 4 — Cluster pipeline VALIDATED (smoke; NOT a result)
+- Explorer (Northeastern) bring-up. Env: torch 2.4.1+cu121 (cu130 default was too new for the
+  node driver, CUDA 12.3), transformers 4.57.6, datasets 5.0.0. Install debugging documented:
+  login-node reaper (run install as a batch job), download.pytorch.org blocked by proxy (torch
+  from PyPI), `module purge` clears the proxy (export after module load).
+- Smoke run (configs/smoke_cluster.yaml, OPD-RKL, 20 steps, Qwen2.5-0.5B<-1.5B) COMPLETED in
+  3:33 on a Tesla V100. The full real-model path works: load -> on-policy generate -> reverse-KL
+  update (loss 0.582 -> 0.293) -> greedy horizon eval -> positional-KL probe -> metrics.json +
+  figure. Two bugs the smoke caught and fixed: dtype= kwarg (transformers 5/4), and HFSampler
+  passing example dicts to the tokenizer instead of prompt strings.
+- These smoke metrics are a PLUMBING CHECK, not a finding: 20 steps cannot teach the task, so the
+  accuracy (~0.1) is noise. No scientific number is claimed. The next step is a calibration run to
+  size steps + GPU-hours, then the pre-registered sweep.
+
 ### 2026-06-30  Phase 3 — On-policy distiller + TRL oracle (no GPU run)
 - The on-policy distiller was implemented in Phase 1 (CPU smoke: loss decreases over 30 steps,
   student updates, teacher stays frozen with no grad). Phase 3 adds the correctness oracle.
