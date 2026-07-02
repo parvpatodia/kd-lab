@@ -40,6 +40,31 @@ positional teacher-student KL curve. State plainly whether the gap widens with h
   accuracy (~0.1) is noise. No scientific number is claimed. The next step is a calibration run to
   size steps + GPU-hours, then the pre-registered sweep.
 
+### 2026-07-02  Phase 4 — Task-viability diagnostic (zero-shot, greedy, n=30)
+Before spending sweep compute, checked whether the teacher can actually do pointer-chase (else the
+horizon study is floor-vs-floor). Critical finding: the Qwen2.5 Instruct models need the chat
+template; the initial harness fed raw prompts.
+
+| horizon k | teacher raw | teacher chat-templated | student base chat-templated |
+|-----------|-------------|------------------------|-----------------------------|
+| 2 | 0.033 | 0.367 | 0.033 |
+| 3 | 0.000 | 0.400 | 0.067 |
+| 4 | 0.067 | 0.167 | 0.100 |
+| 5 | 0.067 | 0.200 | 0.067 |
+| 6 | 0.067 | 0.300 | 0.033 |
+
+- With the chat template the teacher goes from ~5% (floor) to ~30%, well above the ~6% base
+  student. There is a real capability gap to distill: the task is viable. The earlier calibration
+  (student stuck at ~8%) was crippled by the missing chat template, not a dead task.
+- Harness fixes from this phase: apply_chat_template for Instruct models (+ add_generation_prompt);
+  generation length 96 -> 256 (teacher CoT was truncated); torch 2.4.1+cu121 (cu130 default too new
+  for the CUDA 12.3 node driver); request a 32GB GPU with batch 4 (full-vocab V=151936 divergence
+  OOMs 16GB); batch the eval generation and the positional-KL probe (forwarding a whole horizon set
+  or a 32-example probe OOMs even 32GB).
+- GPU time: a 400-step OPD-RKL run is ~1h20m on a V100-sxm2 (chat template + 256-token generation).
+  A 1000-step run projects to ~3.4h, near the 4-GPU-hour per-run checkpoint; sweep step count and
+  the 36-run aggregate (~50-60+ GPU-hr) need a scoping decision before launch.
+
 ### 2026-06-30  Phase 3 — On-policy distiller + TRL oracle (no GPU run)
 - The on-policy distiller was implemented in Phase 1 (CPU smoke: loss decreases over 30 steps,
   student updates, teacher stays frozen with no grad). Phase 3 adds the correctness oracle.
