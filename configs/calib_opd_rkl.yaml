@@ -30,7 +30,7 @@ distillation:
 sampling:
   temperature: 1.0
   top_p: 1.0
-  max_new_tokens: 96
+  max_new_tokens: 256
 
 optim:
   lr: 1.0e-5

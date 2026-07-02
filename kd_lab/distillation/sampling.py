@@ -17,6 +17,16 @@ import torch
 from .on_policy import Rollouts, Sampler
 
 
+def render_prompt(tokenizer, prompt: str) -> str:
+    """Apply the chat template for Instruct models (with a generation prompt); pass through if the
+    tokenizer has no chat template. Instruct models behave poorly on raw, un-templated prompts."""
+    if getattr(tokenizer, "chat_template", None):
+        return tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True
+        )
+    return prompt
+
+
 def build_response_mask(
     full_ids: torch.Tensor, prompt_len: int, eos_token_id: int | None
 ) -> torch.Tensor:
@@ -80,8 +90,9 @@ class HFSampler(Sampler):
 
     @torch.no_grad()
     def generate(self, model, prompts) -> Rollouts:
-        # The batch flows as example dicts through the rollout sources; extract the prompt string.
-        texts = [p["prompt"] if isinstance(p, dict) else p for p in prompts]
+        # The batch flows as example dicts through the rollout sources; extract the prompt string
+        # and apply the chat template (Instruct models).
+        texts = [render_prompt(self.tokenizer, p["prompt"] if isinstance(p, dict) else p) for p in prompts]
         enc = self.tokenizer(texts, return_tensors="pt", padding=True)
         input_ids = enc["input_ids"].to(self.device)
         attn_in = enc["attention_mask"].to(self.device)

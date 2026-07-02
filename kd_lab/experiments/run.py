@@ -36,7 +36,7 @@ from ..distillation.on_policy import (
     StudentRolloutSource,
     TeacherRolloutSource,
 )
-from ..distillation.sampling import HFSampler
+from ..distillation.sampling import HFSampler, render_prompt
 from ..distillation.supervised import SupervisedDistiller
 from ..evaluation.metrics import (
     aggregate_pass_at_k,
@@ -156,7 +156,9 @@ def build_distiller(cfg: dict, student, teacher, rollout_source, divergence: Div
 # Off-policy dataset: encode prompt + target into Rollouts (gold for B0/B2, teacher-gen for B1).
 # --------------------------------------------------------------------------------------
 def _encode_example(tokenizer, prompt: str, target: str, max_len: int, eos_id: int | None):
-    p = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    # chat-template the prompt (Instruct models) so off-policy training matches how the student
+    # is prompted at generation/eval time.
+    p = tokenizer(render_prompt(tokenizer, prompt), add_special_tokens=False)["input_ids"]
     t = tokenizer(target, add_special_tokens=False)["input_ids"]
     if eos_id is not None:
         t = list(t) + [eos_id]
