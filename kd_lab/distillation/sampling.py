@@ -80,7 +80,9 @@ class HFSampler(Sampler):
 
     @torch.no_grad()
     def generate(self, model, prompts) -> Rollouts:
-        enc = self.tokenizer(list(prompts), return_tensors="pt", padding=True)
+        # The batch flows as example dicts through the rollout sources; extract the prompt string.
+        texts = [p["prompt"] if isinstance(p, dict) else p for p in prompts]
+        enc = self.tokenizer(texts, return_tensors="pt", padding=True)
         input_ids = enc["input_ids"].to(self.device)
         attn_in = enc["attention_mask"].to(self.device)
         prompt_len = input_ids.shape[1]

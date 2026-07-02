@@ -59,6 +59,8 @@ class _StubTokenizer:
         self.eos_token = "<eos>"
 
     def __call__(self, prompts, return_tensors=None, padding=None):
+        # the sampler must pass plain strings, never example dicts.
+        assert all(isinstance(p, str) for p in prompts), "tokenizer received a non-string input"
         # two prompts, left-padded to length 2 (row 1 has a leading pad).
         return {
             "input_ids": torch.tensor([[1, 2], [0, 3]]),
@@ -78,7 +80,8 @@ class TestHFSamplerWiring:
         sampler = HFSampler(tok, max_new_tokens=3, temperature=0.0, device="cpu")
         assert tok.padding_side == "left"  # forced for batched causal generation
 
-        roll = sampler.generate(_StubModel(), ["a", "b"])
+        # pass example dicts (as the rollout sources do): the sampler must extract prompt strings.
+        roll = sampler.generate(_StubModel(), [{"prompt": "a"}, {"prompt": "b"}])
         assert torch.equal(roll.input_ids, torch.tensor([[1, 2, 5, 9, 0], [0, 3, 6, 7, 8]]))
         # response mask: 0 over the prompt, generated tokens up to and including the first EOS.
         assert torch.equal(roll.response_mask, torch.tensor([[0, 0, 1, 1, 0], [0, 0, 1, 1, 1]]))
