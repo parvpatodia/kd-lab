@@ -330,7 +330,7 @@ def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
     """Greedy horizon-stratified exact-match accuracy + the positional teacher-student KL probe."""
     scorer = get_scorer(cfg)
     eval_bs = int(cfg.get("eval", {}).get("eval_batch_size", 16))
-    records = []
+    records: list[dict] = []
     for k, examples in eval_sets.items():
         for i in range(0, len(examples), eval_bs):  # chunk: generation OOMs on a full horizon set
             chunk = examples[i : i + eval_bs]
