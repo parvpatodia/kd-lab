@@ -1,8 +1,9 @@
 #!/bin/bash
 # Single-condition launcher: sbatch kd_lab/experiments/run_one.sbatch <config.yaml>
 # Any GPU (v100 or a100); --time caps a run under the 4-GPU-hour checkpoint.
+# 32GB+ GPU: the full-vocab divergences materialize [B,T,151936] tensors, which OOM a 16GB card.
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:v100-sxm2:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=04:00:00
@@ -16,6 +17,7 @@ module load cuDNN/9.10.2
 module load anaconda3/2024.06
 export http_proxy=http://10.99.0.130:3128
 export https_proxy=http://10.99.0.130:3128
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 PROJ_DIR="${PROJ_DIR:-/home/patodia.pa/kd-lab}"
 cd "$PROJ_DIR"
 mkdir -p logs

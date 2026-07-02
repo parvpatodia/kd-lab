@@ -39,10 +39,10 @@ optim:
   weight_decay: 0.0
   warmup_steps: 50
   max_steps: 1000
-  batch_size: 16
+  batch_size: 4          # full-vocab divergence (V=151936) is memory-heavy; keep batch small
   grad_accum: 1
   grad_clip: 1.0
-  max_seq_len: 1024
+  max_seq_len: 768
 
 eval:
   probe_examples: 64                   # rollouts for the positional-KL probe

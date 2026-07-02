@@ -37,10 +37,10 @@ optim:
   weight_decay: 0.0
   warmup_steps: 20
   max_steps: 400
-  batch_size: 8
+  batch_size: 4          # full-vocab divergence is memory-heavy (V=151936); keep batch small
   grad_accum: 1
   grad_clip: 1.0
-  max_seq_len: 768
+  max_seq_len: 640
 
 eval:
   probe_examples: 32

@@ -12,7 +12,7 @@
 #================================================================
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:v100-sxm2:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64GB
 #SBATCH --time=04:00:00
@@ -31,6 +31,7 @@ module load anaconda3/2024.06
 # Explorer proxy for outbound (HF model downloads). Set AFTER module purge, which clears it.
 export http_proxy=http://10.99.0.130:3128
 export https_proxy=http://10.99.0.130:3128
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 PROJ_DIR="${PROJ_DIR:-/home/patodia.pa/kd-lab}"
 cd "$PROJ_DIR"
