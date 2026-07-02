@@ -14,7 +14,7 @@ task:
   shuffle_table: true
   train_k: [2, 3, 4]                    # horizons mixed during training
   eval_k: [2, 3, 4, 5, 6, 7, 8]         # horizon sweep for RQ1 (includes extrapolation beyond train)
-  n_train: 4000
+  n_train: 2000                        # 400 steps x batch 4 samples ~1600; also bounds B1 teacher-gen cost
   n_eval_per_k: 100                     # per horizon, per seed (300 across 3 seeds)
 
 models:

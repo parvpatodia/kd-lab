@@ -252,8 +252,10 @@ def build_offpolicy_dataset(cfg: dict, train_examples, tokenizer, teacher=None, 
     if method == "seq_kd":
         if teacher is None or sampler is None:
             raise ValueError("seq_kd needs the teacher and a sampler to generate targets")
-        roll = sampler.generate(teacher, examples)
-        gen = decode_responses(tokenizer, roll)
+        bs = int(cfg.get("eval", {}).get("eval_batch_size", 16))
+        gen: list[str] = []
+        for i in range(0, len(examples), bs):  # chunk: generating all targets at once OOMs
+            gen.extend(decode_responses(tokenizer, sampler.generate(teacher, examples[i : i + bs])))
         for ex, g in zip(examples, gen, strict=True):
             ex["target"] = g
     return EncodedRolloutDataset(
