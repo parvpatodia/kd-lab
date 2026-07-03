@@ -12,6 +12,7 @@ metrics.json schema (JSON turns the integer horizon keys into strings; we normal
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import math
@@ -157,3 +158,27 @@ def plot_positional_kl(runs: list[dict], path: str, keys: list[tuple] | None = N
     fig.savefig(path, dpi=120)
     plt.close(fig)
     return True
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--results", default="results", help="root holding <run>/metrics.json dirs")
+    ap.add_argument("--out", default="results/analysis", help="output dir for table + figures")
+    args = ap.parse_args()
+
+    runs = [r for r in load_runs(args.results) if r["_run_dir"] not in ("smoke_cluster", "calib_opd_rkl")]
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    write_results_table(runs, str(out / "results_table.csv"))
+    agg = aggregate_over_seeds(runs)
+    fig_ok = plot_horizon_comparison(agg, str(out / "horizon_accuracy.png"))
+    plot_positional_kl(runs, str(out / "positional_kl.png"))
+
+    print(f"aggregated {len(runs)} runs -> {out} (figures: {'yes' if fig_ok else 'matplotlib missing'})")
+    for key in sorted(agg, key=lambda k: (k[0], k[1], k[2])):
+        cells = "  ".join(f"k{k}={agg[key][k]['mean']:.2f}" for k in sorted(agg[key]))
+        print(f"  {_label(key):22s} (n={next(iter(agg[key].values()))['n_seeds']})  {cells}")
+
+
+if __name__ == "__main__":
+    main()
