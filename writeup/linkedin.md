@@ -1,22 +1,21 @@
-# LinkedIn post (template)
+# LinkedIn post
 
-Keep it 4-8 sentences. One hook, one result, one honest caveat, the links. No emoji spam, no
-"thrilled/excited". Fill the brackets after the run.
+I ran a controlled study on on-policy distillation: instead of training a small student on a
+teacher's fixed outputs, the student generates its own rollouts and a frozen teacher grades every
+token, so the student learns on the states it actually visits at inference. It is the language-model
+version of DAgger's fix for exposure bias.
 
----
+On a horizon-controllable task (train on short chains, test on longer ones), the result was a clean
+crossover. Off-policy SFT was near-perfect in-distribution and then collapsed on longer horizons
+(0.99 to 0.04); on-policy reverse-KL distillation was weaker in-distribution but held up on
+extrapolation (0.21 at the longest horizon, a ~5x gap). A per-token teacher-student KL probe shows
+why: the off-policy student drifts away from the teacher on its own rollouts, while the on-policy
+student stays aligned.
 
-Off-policy distillation trains a small model on the teacher's outputs. On-policy distillation
-trains it on its own outputs, graded token by token by the teacher. The second one fixes a
-specific failure: when a model conditions on its own earlier tokens at inference, errors compound
-over the sequence.
+Honest caveat: this is one synthetic task and greedy evaluation. I did not yet test the known
+reverse-KL diversity-collapse tradeoff (pass@k, entropy), and the efficiency comparison is future
+work. The method is not mine, it is GKD (Agarwal et al., 2023); the contribution is the clean
+divergence-by-data-source implementation and the controlled mechanism study.
 
-I added on-policy distillation to my distillation library and ran a controlled test of that
-mechanism: I measured the off-policy-versus-on-policy gap as a function of how many reasoning
-steps the task requires. [Result: the gap grew from X at k=2 to Y at k=6 / the gap did not grow,
-which suggests Z.] I also reproduced the reverse-KL diversity tradeoff: [one line].
-
-This is a reproduction of GKD (Agarwal et al., 2023), not a new method. The point was to
-understand why it works and to connect it to the compounding-error problem I study in closed-loop
-planning. Write-up and code below.
-
-[article link] · [github link]
+Same compounding-error-over-horizon problem I see in closed-loop planning, which is why I built it.
+Code, 36-run results with config hashes, and figures: https://github.com/parvpatodia/kd-lab

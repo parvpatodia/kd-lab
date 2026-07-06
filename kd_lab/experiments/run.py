@@ -36,9 +36,14 @@ from ..distillation.on_policy import (
     StudentRolloutSource,
     TeacherRolloutSource,
 )
-from ..distillation.sampling import HFSampler
+from ..distillation.sampling import HFSampler, render_prompt
 from ..distillation.supervised import SupervisedDistiller
-from ..evaluation.metrics import horizon_stratified_accuracy
+from ..evaluation.metrics import (
+    aggregate_pass_at_k,
+    distinct_n,
+    empirical_token_entropy,
+    horizon_stratified_accuracy,
+)
 from ..evaluation.positional_kl import positional_teacher_student_kl
 from ..tasks.pointer_chase import PointerChaseConfig, make_dataset, make_eval_sets, score_final
 
@@ -98,6 +103,30 @@ def build_pointer_chase_data(cfg: dict):
     return train, eval_sets
 
 
+def build_task_data(cfg: dict):
+    """Dispatch on ``task.name``: pointer_chase (synthetic, offline) or gsm8k (external validity)."""
+    name = cfg["task"].get("name", "pointer_chase")
+    if name == "pointer_chase":
+        return build_pointer_chase_data(cfg)
+    if name == "gsm8k":
+        from ..tasks.gsm8k import eval_sets_by_length, load_gsm8k  # lazy: needs `datasets`
+
+        t = cfg["task"]
+        train = load_gsm8k("train", n=t.get("n_train"))
+        test = load_gsm8k("test", n=t.get("n_eval_total"))
+        return train, eval_sets_by_length(test)
+    raise ValueError(f"unknown task: {name}")
+
+
+def get_scorer(cfg: dict):
+    """Return the exact-match scorer for the configured task."""
+    if cfg["task"].get("name", "pointer_chase") == "gsm8k":
+        from ..tasks.gsm8k import score_gsm8k
+
+        return score_gsm8k
+    return score_final
+
+
 def build_rollout_source(cfg: dict, student, sampler, off_dataset):
     """Select the data source from the distillation block and the method."""
     d = cfg["distillation"]
@@ -127,7 +156,9 @@ def build_distiller(cfg: dict, student, teacher, rollout_source, divergence: Div
 # Off-policy dataset: encode prompt + target into Rollouts (gold for B0/B2, teacher-gen for B1).
 # --------------------------------------------------------------------------------------
 def _encode_example(tokenizer, prompt: str, target: str, max_len: int, eos_id: int | None):
-    p = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    # chat-template the prompt (Instruct models) so off-policy training matches how the student
+    # is prompted at generation/eval time.
+    p = tokenizer(render_prompt(tokenizer, prompt), add_special_tokens=False)["input_ids"]
     t = tokenizer(target, add_special_tokens=False)["input_ids"]
     if eos_id is not None:
         t = list(t) + [eos_id]
@@ -173,6 +204,13 @@ def decode_responses(tokenizer, rollouts: Rollouts) -> list[str]:
     return out
 
 
+def response_token_ids(rollouts: Rollouts) -> list[list[int]]:
+    """The response token ids per row (for distinct-n and token entropy)."""
+    ids = rollouts.input_ids.cpu()
+    mask = rollouts.response_mask.bool().cpu()
+    return [row_ids[row_mask].tolist() for row_ids, row_mask in zip(ids, mask, strict=True)]
+
+
 # ---- SEAMS: real HF wiring, exercised on the A100 (import transformers lazily) ----
 def load_models(cfg: dict):
     """Load student (trainable) + teacher (frozen) + shared tokenizer. Needs a GPU for real sizes."""
@@ -182,8 +220,9 @@ def load_models(cfg: dict):
     dtype = getattr(torch, m.get("dtype", "bfloat16"))
     device = cfg.get("device", "cuda")
     tokenizer = AutoTokenizer.from_pretrained(m["student"])
-    student = AutoModelForCausalLM.from_pretrained(m["student"], torch_dtype=dtype).to(device)
-    teacher = AutoModelForCausalLM.from_pretrained(m["teacher"], torch_dtype=dtype).to(device)
+    # `dtype=` is the current kwarg (transformers >=4.44 and 5.x); `torch_dtype` was removed in 5.x.
+    student = AutoModelForCausalLM.from_pretrained(m["student"], dtype=dtype).to(device)
+    teacher = AutoModelForCausalLM.from_pretrained(m["teacher"], dtype=dtype).to(device)
     teacher.eval()
     for p in teacher.parameters():
         p.requires_grad_(False)
@@ -213,8 +252,10 @@ def build_offpolicy_dataset(cfg: dict, train_examples, tokenizer, teacher=None, 
     if method == "seq_kd":
         if teacher is None or sampler is None:
             raise ValueError("seq_kd needs the teacher and a sampler to generate targets")
-        roll = sampler.generate(teacher, examples)
-        gen = decode_responses(tokenizer, roll)
+        bs = int(cfg.get("eval", {}).get("eval_batch_size", 16))
+        gen: list[str] = []
+        for i in range(0, len(examples), bs):  # chunk: generating all targets at once OOMs
+            gen.extend(decode_responses(tokenizer, sampler.generate(teacher, examples[i : i + bs])))
         for ex, g in zip(examples, gen, strict=True):
             ex["target"] = g
     return EncodedRolloutDataset(
@@ -252,7 +293,7 @@ def build_optimizer(cfg: dict, student):
 def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "results") -> dict:
     """Train one condition then evaluate. Returns the metrics dict and writes it to disk."""
     seed_everything(int(cfg.get("seed", 0)))
-    train_examples, eval_sets = build_pointer_chase_data(cfg)
+    train_examples, eval_sets = build_task_data(cfg)
 
     divergence = build_divergence(
         cfg["distillation"]["divergence"],
@@ -281,29 +322,37 @@ def run_condition(cfg: dict, comp: RunComponents, *, results_root: str = "result
         "config_hash": config_hash(cfg),
         "n_train": len(train_examples),
         "train_log": train_log,
-        "horizon_accuracy": eval_out["horizon_accuracy"],
-        "positional_kl": eval_out["positional_kl"],
     }
+    results.update(eval_out)  # horizon_accuracy, positional_kl, and optional pass_at_k/diversity
     _save_results(cfg, results, results_root)
     return results
 
 
 def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
     """Greedy horizon-stratified exact-match accuracy + the positional teacher-student KL probe."""
-    records = []
+    scorer = get_scorer(cfg)
+    eval_bs = int(cfg.get("eval", {}).get("eval_batch_size", 16))
+    records: list[dict] = []
     for k, examples in eval_sets.items():
-        roll = comp.eval_sampler.generate(comp.student, examples)
-        texts = decode_responses(comp.tokenizer, roll)
-        for ex, txt in zip(examples, texts, strict=True):
-            records.append({"k": k, "correct": int(score_final(txt, ex))})
+        for i in range(0, len(examples), eval_bs):  # chunk: generation OOMs on a full horizon set
+            chunk = examples[i : i + eval_bs]
+            texts = decode_responses(comp.tokenizer, comp.eval_sampler.generate(comp.student, chunk))
+            records.extend(
+                {"k": k, "correct": int(scorer(txt, ex))} for ex, txt in zip(chunk, texts, strict=True)
+            )
     horizon = horizon_stratified_accuracy(records)
 
     # positional-KL probe on one mid-horizon eval set (RQ1 mechanism diagnostic).
     ks = sorted(eval_sets)
-    probe_examples = eval_sets[ks[len(ks) // 2]][: cfg.get("eval", {}).get("probe_examples", 32)]
+    probe_examples = eval_sets[ks[len(ks) // 2]][: int(cfg.get("eval", {}).get("probe_examples", 16))]
     probe_roll = comp.eval_sampler.generate(comp.student, probe_examples)
     pk = positional_teacher_student_kl(
-        comp.student, comp.teacher, probe_roll, device=cfg.get("device", "cuda"), direction="reverse"
+        comp.student,
+        comp.teacher,
+        probe_roll,
+        device=cfg.get("device", "cuda"),
+        direction="reverse",
+        batch_size=min(eval_bs, 4),  # the scoring forward is the heaviest op (two [B,T,V] tensors)
     )
     # keep only populated positions, as plain lists for JSON.
     valid = pk["count"] > 0
@@ -311,7 +360,47 @@ def evaluate(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
         "position": pk["position"][valid].tolist(),
         "mean_kl": [float(x) for x in pk["mean_kl"][valid]],
     }
-    return {"horizon_accuracy": horizon, "positional_kl": positional}
+    out = {"horizon_accuracy": horizon, "positional_kl": positional}
+    out.update(_passk_and_diversity(cfg, comp, eval_sets))
+    return out
+
+
+def _passk_and_diversity(cfg: dict, comp: RunComponents, eval_sets: dict) -> dict:
+    """Optional H2 metrics: pass@k plus diversity (distinct-n, token entropy) from sampled outputs.
+
+    Gated by ``eval.n_samples_for_pass_at_k`` (0 disables). Uses the sampling sampler (temperature
+    > 0), not the greedy eval sampler, over a capped pool of eval examples to bound cost.
+    """
+    ecfg = cfg.get("eval", {})
+    n = int(ecfg.get("n_samples_for_pass_at_k", 0))
+    if n <= 0:
+        return {}
+    ks = [k for k in ecfg.get("pass_at_k", [1, 4, 16]) if k <= n]
+    cap = int(ecfg.get("passk_examples", 50))
+    eval_bs = int(ecfg.get("eval_batch_size", 16))
+    pool = [ex for exs in eval_sets.values() for ex in exs][:cap]
+    scorer = get_scorer(cfg)
+
+    correct = [0] * len(pool)
+    gen_tokens: list[list[int]] = []
+    for _ in range(n):
+        for i in range(0, len(pool), eval_bs):  # chunk generation to bound memory
+            chunk = pool[i : i + eval_bs]
+            roll = comp.sampler.generate(comp.student, chunk)  # sampling (temperature > 0)
+            texts = decode_responses(comp.tokenizer, roll)
+            for j, (ex, txt) in enumerate(zip(chunk, texts, strict=True)):
+                if scorer(txt, ex):
+                    correct[i + j] += 1
+            gen_tokens.extend(response_token_ids(roll))
+
+    return {
+        "pass_at_k": {f"pass@{k}": aggregate_pass_at_k(correct, n, k) for k in ks},
+        "diversity": {
+            "distinct_1": distinct_n(gen_tokens, 1),
+            "distinct_2": distinct_n(gen_tokens, 2),
+            "token_entropy": empirical_token_entropy(gen_tokens),
+        },
+    }
 
 
 def _save_results(cfg: dict, results: dict, results_root: str) -> None:
@@ -349,7 +438,7 @@ def _save_horizon_figure(results: dict, path: Path) -> None:
 def train_and_eval(cfg: dict) -> dict:
     """Full condition on real models (A100 path). Builds components, then runs the loop + eval."""
     seed_everything(int(cfg.get("seed", 0)))
-    train_examples, _ = build_pointer_chase_data(cfg)
+    train_examples, _ = build_task_data(cfg)
     student, teacher, tokenizer = load_models(cfg)
     sampler = build_sampler(cfg, tokenizer)
     eval_sampler = build_sampler(cfg, tokenizer, greedy=True)
@@ -388,7 +477,7 @@ def main() -> None:
     cfg = load_config(args.config)
     plan = resolved_plan(cfg)
     if args.dry_run:
-        train, eval_sets = build_pointer_chase_data(cfg)
+        train, eval_sets = build_task_data(cfg)
         build_divergence(
             cfg["distillation"]["divergence"],
             temperature=cfg["distillation"].get("temperature", 1.0),

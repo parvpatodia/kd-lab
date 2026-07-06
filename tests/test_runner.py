@@ -193,3 +193,13 @@ class TestRunCondition:
         assert len(results["train_log"]) >= 1
         assert all("loss" in e for e in results["train_log"])
         assert (tmp_path / "test_opd" / "metrics.json").exists()
+
+    def test_passk_and_diversity_wired(self, tmp_path):
+        cfg = _base_cfg("on_policy", "reverse_kl", "test_passk")
+        cfg["eval"].update({"n_samples_for_pass_at_k": 4, "pass_at_k": [1, 4], "passk_examples": 5})
+        comp = _components(cfg, _StubTokenizer())
+        results = run_condition(cfg, comp, results_root=str(tmp_path))
+
+        assert set(results["pass_at_k"]) == {"pass@1", "pass@4"}
+        assert all(0.0 <= v <= 1.0 for v in results["pass_at_k"].values())
+        assert {"distinct_1", "distinct_2", "token_entropy"} <= set(results["diversity"])

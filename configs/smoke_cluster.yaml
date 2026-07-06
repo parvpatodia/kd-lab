@@ -1,0 +1,50 @@
+# Tiny end-to-end smoke on real Qwen models: validates load_models + HF generation + the
+# train loop + eval + figure on one A100 in a few minutes (well under the 4-GPU-hour checkpoint).
+# This is a PIPELINE check, not a result: 20 steps cannot teach the task, so accuracy will be low.
+
+run_name: smoke_cluster
+seed: 0
+device: cuda
+
+task:
+  name: pointer_chase
+  num_nodes: 16
+  shuffle_table: true
+  train_k: [1, 2, 3]
+  eval_k: [1, 2, 3, 4]
+  n_train: 64
+  n_eval_per_k: 10
+
+models:
+  student: Qwen/Qwen2.5-0.5B-Instruct
+  teacher: Qwen/Qwen2.5-1.5B-Instruct
+  dtype: bfloat16
+
+distillation:
+  method: on_policy
+  divergence: reverse_kl
+  beta: 0.5
+  temperature: 1.0
+  on_policy_fraction: 1.0
+
+sampling:
+  temperature: 1.0
+  top_p: 1.0
+  max_new_tokens: 64
+
+optim:
+  lr: 1.0e-5
+  weight_decay: 0.0
+  warmup_steps: 2
+  max_steps: 20
+  batch_size: 4
+  grad_accum: 1
+  grad_clip: 1.0
+  max_seq_len: 512
+
+eval:
+  probe_examples: 8
+
+logging:
+  backend: none
+  project: kd-lab-opd
