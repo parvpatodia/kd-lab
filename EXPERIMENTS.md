@@ -8,23 +8,76 @@ the primary metric (exact-match accuracy) before Phase 4 and do not change it af
 For each run record: date, config file + hash, condition, seed(s), GPU-hours, the primary
 metric with CI, and one line on anything surprising. Link the W&B run.
 
-## Results table (fill as runs complete)
+## Results (pointer-chase, Qwen2.5-0.5B <- 1.5B, 400 steps, 3 seeds; base config hash a1dd895faf1f)
 
-| date | condition | divergence | lambda | task | seeds | GPU-hrs | acc (mean) | 95% CI | pass@16 | notes |
-|------|-----------|------------|--------|------|-------|---------|-----------|--------|---------|-------|
-| _template_ | _OPD-RKL_ | _reverse_kl_ | _1.0_ | _pointer-chase_ | _0,1,2_ | _TBD_ | _TBD_ | _[lo, hi]_ | _TBD_ | _example row, replace with a real run_ |
+Task: pointer-chase, num_nodes=32, train horizons k in {2,3,4}, eval k in {2..8} (so **k>=5 is
+extrapolation beyond the training horizon**). Primary metric: greedy exact-match accuracy. Values
+are the mean over seeds 0,1,2 (per-run 95% bootstrap CIs over 100 eval examples are in each
+`results/<run>/metrics.json`). Full table: `results/analysis/results_table.csv`. 36/36 runs, all
+completed on Explorer V100-sxm2, ~1.3-1.5 GPU-hr each (~50 GPU-hr total). Sweep array 8088396,
+8118524, 8143267, 8184440, 8185806.
 
-## Horizon analysis (RQ1 / H1)
-Record off-policy vs on-policy accuracy per horizon bucket once Phase 4 runs. The headline plot
-is accuracy vs horizon for B-best (off-policy) and OPD-RKL (on-policy) with CIs, plus the
-positional teacher-student KL curve. State plainly whether the gap widens with horizon.
+| condition (method / divergence, lambda) | k2 | k3 | k4 | k5 | k6 | k7 | k8 |
+|---|---|---|---|---|---|---|---|
+| B0 SFT (gold, off-policy)          | 1.00 | 1.00 | 0.99 | 0.25 | 0.06 | 0.03 | 0.04 |
+| B1 seq-KD (teacher-gen, off-policy)| 1.00 | 1.00 | 0.99 | 0.25 | 0.06 | 0.03 | 0.04 |
+| B2 logit-KD (fwd-KL on gold, off)  | 0.07 | 0.17 | 0.09 | 0.09 | 0.11 | 0.13 | 0.12 |
+| OPD-FKL (on-policy, lambda=1)      | 0.34 | 0.35 | 0.14 | 0.15 | 0.05 | 0.11 | 0.12 |
+| OPD-JSD(0.1) (on-policy)           | 0.37 | 0.31 | 0.17 | 0.11 | 0.10 | 0.13 | 0.11 |
+| OPD-JSD(0.5) (on-policy)           | 0.44 | 0.41 | 0.21 | 0.22 | 0.16 | 0.18 | 0.20 |
+| OPD-JSD(0.9) (on-policy)           | 0.40 | 0.46 | 0.28 | 0.23 | 0.17 | 0.17 | 0.15 |
+| **OPD-RKL (on-policy, lambda=1)**  | 0.48 | 0.49 | 0.31 | 0.22 | 0.19 | 0.23 | 0.21 |
+| OPD-RKL lambda=0.0 (off-policy RKL)| 0.03 | 0.15 | 0.11 | 0.15 | 0.16 | 0.18 | 0.18 |
+| OPD-RKL lambda=0.25               | 0.32 | 0.29 | 0.19 | 0.15 | 0.17 | 0.16 | 0.13 |
+| OPD-RKL lambda=0.5                | 0.39 | 0.39 | 0.27 | 0.27 | 0.28 | 0.26 | 0.23 |
+| OPD-RKL lambda=0.75              | 0.51 | 0.48 | 0.33 | 0.30 | 0.26 | 0.25 | 0.26 |
 
-## Ablations (RQ2 / RQ3)
-- Divergence sweep (forward_kl, reverse_kl, generalized_jsd beta in {0.1, 0.5, 0.9}): accuracy and
-  diversity (pass@k, entropy, distinct-n). Note the reverse-KL diversity-collapse result either way.
-- Lambda sweep {0.0, 0.25, 0.5, 0.75, 1.0}: accuracy vs lambda; where do the gains saturate.
+Figures: `results/figures/fig1_h1_offpolicy_vs_onpolicy.png`, `fig2_lambda_sweep.png`,
+`fig3_divergence.png`, `fig4_positional_kl.png`.
+
+## Hypothesis verdicts (pre-registered in BUILDPLAN section 3)
+
+**H1 (exposure bias / horizon) — CONFIRMED, with a crossover.** Off-policy SFT/seq-KD are near
+perfect in-distribution (k<=4 ~ 1.00) then collapse on extrapolation (k8 = 0.04). On-policy OPD-RKL
+is worse in-distribution (k2 = 0.48) but degrades far more gently and dominates on extrapolation
+(k8 = 0.21 vs 0.04, a ~5x gap; the curves cross near k=5). So the off-policy-vs-on-policy gap
+depends on horizon and flips sign: off-policy wins where it has gold supervision, on-policy wins
+where the student must handle states beyond the training horizon. Mechanism confirmed directly by
+the positional probe: the SFT student's reverse-KL to the teacher on its own rollouts is large and
+erratic (pos0 = 4.75, then ~0.5-1.6), while the on-policy student stays uniformly low and flat
+(~0.0-0.17). The on-policy student trained on its own state distribution, so it does not drift.
+
+**H2 (divergence) — accuracy part CONFIRMED; diversity part NOT TESTED.** For on-policy (lambda=1),
+reverse KL > JSD > forward KL on exact-match (RKL k2=0.48 vs FKL k2=0.34; FKL collapses on the tail
+like off-policy). Generalized JSD interpolates, best around beta=0.5-0.9. The diversity-collapse
+claim (pass@k, entropy, distinct-n) was NOT tested: the sweep ran greedy eval only
+(n_samples_for_pass_at_k=0). Testing it needs sampled-eval runs; the metrics are implemented and
+tested but were descoped from this sweep to save compute. Recorded as open.
+
+**H3 (data source / lambda) — PARTIALLY CONFIRMED.** Accuracy rises steeply with the on-policy
+fraction and most of the gain arrives by lambda=0.5 (k2: 0.03 -> 0.32 -> 0.39 for lambda 0 ->
+0.25 -> 0.5). But it is NOT strictly monotonic to lambda=1: mixed lambda=0.5-0.75 matches or beats
+pure on-policy on the extrapolation tail (k6: 0.28 at lambda=0.5 vs 0.19 at lambda=1.0), and the
+low-horizon peak is at lambda=0.75 (0.51) not 1.0 (0.48). So "more on-policy is better, with
+diminishing returns, mostly saturated by lambda~0.5-0.75" holds; strict monotonicity to 1.0 does
+not.
+
+**H4 (efficiency) — DESCOPED.** No GPU-hours-to-target-accuracy comparison and no GRPO run
+(BUILDPLAN section 8 fallback 1). Stated as cut, not attempted.
+
+**Honest caveats.** One task (synthetic pointer-chase), one model pair, 400 steps, greedy eval,
+3 seeds; GSM8K wired but not run. B2 off-policy logit-KD stayed near floor (loss fell 0.57 -> 0.13
+but accuracy ~0.1): mass-covering forward KL from a ~30%-accurate teacher does not sharpen into
+correct greedy answers, whereas hard-label SFT does. Not tuned further (tau=1, lr 1e-5); reported
+as observed.
 
 ## Phase log (no-run phases recorded here; numbered runs go below)
+
+### 2026-07-05  Phase 4-5 — Full sweep COMPLETE (36/36)
+- 12 conditions x 3 seeds on pointer-chase, all completed on Explorer V100-sxm2 (~50 GPU-hr,
+  submitted in waves of 8 under the gpu QOS 8-submit/4-run cap). Results + verdicts above; figures
+  in results/figures/. H1 confirmed (crossover + positional-KL mechanism), H2 accuracy confirmed
+  (RKL>JSD>FKL) / diversity untested, H3 partially (saturates ~lambda 0.5-0.75), H4 descoped.
 
 ### 2026-07-02  Phase 4 — Cluster pipeline VALIDATED (smoke; NOT a result)
 - Explorer (Northeastern) bring-up. Env: torch 2.4.1+cu121 (cu130 default was too new for the
