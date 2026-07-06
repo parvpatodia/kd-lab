@@ -68,6 +68,7 @@ def test_write_results_table(tmp_path):
 
 
 def test_plots_write_files(tmp_path):
+    pytest.importorskip("matplotlib")  # figure functions no-op (return False) without matplotlib
     _fixture(tmp_path)
     runs = load_runs(str(tmp_path))
     agg = aggregate_over_seeds(runs)
