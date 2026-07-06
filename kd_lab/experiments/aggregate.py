@@ -16,8 +16,11 @@ import argparse
 import csv
 import json
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
+
+_SEED_RE = re.compile(r"_seed\d+$")
 
 
 def load_runs(results_root: str) -> list[dict]:
@@ -32,10 +35,13 @@ def load_runs(results_root: str) -> list[dict]:
     return runs
 
 
-def condition_key(run: dict) -> tuple:
-    """Group runs that differ only by seed (method, divergence, lambda)."""
-    p = run["plan"]
-    return (p["method"], p["divergence_name"], p["lam"])
+def condition_key(run: dict) -> str:
+    """Group runs that differ only by seed, using the sweep tag (the run dir minus ``_seedN``).
+
+    The tag distinguishes conditions the metrics plan cannot: JSD(0.1) vs JSD(0.5) vs JSD(0.9)
+    (beta is not stored in the plan) and each lambda in the reverse-KL sweep.
+    """
+    return _SEED_RE.sub("", run["_run_dir"])
 
 
 def _mean_std(xs: list[float]) -> tuple[float, float]:
@@ -52,7 +58,7 @@ def _mean_std(xs: list[float]) -> tuple[float, float]:
 def aggregate_over_seeds(runs: list[dict]) -> dict:
     """Return ``{condition_key: {horizon: {mean, std, n_seeds}}}`` averaging each run's per-horizon
     accuracy across seeds."""
-    grouped: dict[tuple, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    grouped: dict[str, dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for run in runs:
         key = condition_key(run)
         for k, stats in run["horizon_accuracy"].items():
@@ -89,11 +95,8 @@ def write_results_table(runs: list[dict], path: str) -> None:
             w.writerow(row)
 
 
-def _label(key: tuple) -> str:
-    method, div, lam = key
-    if method in ("sft", "seq_kd", "logit_kd"):
-        return method
-    return f"opd_{div}_lam{lam}"
+def _label(key: str) -> str:
+    return key  # the condition tag is already the readable label
 
 
 def plot_horizon_comparison(aggregated: dict, path: str, keys: list[tuple] | None = None) -> bool:
@@ -175,9 +178,9 @@ def main() -> None:
     plot_positional_kl(runs, str(out / "positional_kl.png"))
 
     print(f"aggregated {len(runs)} runs -> {out} (figures: {'yes' if fig_ok else 'matplotlib missing'})")
-    for key in sorted(agg, key=lambda k: (k[0], k[1], k[2])):
+    for key in sorted(agg):
         cells = "  ".join(f"k{k}={agg[key][k]['mean']:.2f}" for k in sorted(agg[key]))
-        print(f"  {_label(key):22s} (n={next(iter(agg[key].values()))['n_seeds']})  {cells}")
+        print(f"  {_label(key):24s} (n={next(iter(agg[key].values()))['n_seeds']})  {cells}")
 
 
 if __name__ == "__main__":

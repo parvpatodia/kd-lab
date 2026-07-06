@@ -50,11 +50,11 @@ def test_load_runs_normalizes_horizon_keys(tmp_path):
 def test_aggregate_over_seeds_means(tmp_path):
     _fixture(tmp_path)
     agg = aggregate_over_seeds(load_runs(str(tmp_path)))
-    opd = agg[("on_policy", "reverse_kl", 1.0)]
+    opd = agg["opd_rkl"]  # grouped by run tag (opd_rkl_seed0/1)
     assert opd[2]["n_seeds"] == 2
     assert opd[2]["mean"] == pytest.approx(0.85)  # mean of 0.8 and 0.9
     assert opd[4]["mean"] == pytest.approx(0.55)
-    sft = agg[("sft", "forward_kl", 0.0)]
+    sft = agg["b0_sft"]
     assert sft[2]["n_seeds"] == 1 and sft[2]["std"] == 0.0
 
 
@@ -79,6 +79,7 @@ def test_plots_write_files(tmp_path):
 
 
 def test_condition_key_groups_by_seed():
-    a = {"plan": {"method": "on_policy", "divergence_name": "reverse_kl", "lam": 1.0, "seed": 0}}
-    b = {"plan": {"method": "on_policy", "divergence_name": "reverse_kl", "lam": 1.0, "seed": 5}}
-    assert condition_key(a) == condition_key(b)
+    # tag-based: strips _seedN so JSD betas / lambda variants stay distinct but seeds merge.
+    assert condition_key({"_run_dir": "opd_rkl_seed0"}) == condition_key({"_run_dir": "opd_rkl_seed5"})
+    assert condition_key({"_run_dir": "opd_jsd0.1_seed2"}) == "opd_jsd0.1"
+    assert condition_key({"_run_dir": "opd_jsd0.5_seed0"}) != condition_key({"_run_dir": "opd_jsd0.1_seed0"})
