@@ -99,7 +99,7 @@ def _label(key: str) -> str:
     return key  # the condition tag is already the readable label
 
 
-def plot_horizon_comparison(aggregated: dict, path: str, keys: list[tuple] | None = None) -> bool:
+def plot_horizon_comparison(aggregated: dict, path: str, keys: list[str] | None = None) -> bool:
     """RQ1 headline: accuracy vs horizon k per condition (mean over seeds, +/- std band).
 
     Returns True if a figure was written, False if matplotlib is unavailable.
@@ -130,7 +130,7 @@ def plot_horizon_comparison(aggregated: dict, path: str, keys: list[tuple] | Non
     return True
 
 
-def plot_positional_kl(runs: list[dict], path: str, keys: list[tuple] | None = None) -> bool:
+def plot_positional_kl(runs: list[dict], path: str, keys: list[str] | None = None) -> bool:
     """Positional teacher-student KL vs token index (one curve per selected condition, seed 0)."""
     try:
         import matplotlib
